@@ -1,0 +1,28 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio 14
+VisualStudioVersion = 14.0.24720.0
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{89434AC0-3631-49B6-81DE-1A4B67F8368E}") = "Kdtree", "src\Kdtree\Kdtree.xproj", "{B1FE0C92-6B79-4F72-80FD-0E8159B24E10}"
+EndProject
+Project("{89434AC0-3631-49B6-81DE-1A4B67F8368E}") = "Kdtree.Test", "test\Kdtree.Test\Kdtree.Test.xproj", "{1F9B6DFB-D6AB-4801-A40D-B85DBF7C0416}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{B1FE0C92-6B79-4F72-80FD-0E8159B24E10}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{B1FE0C92-6B79-4F72-80FD-0E8159B24E10}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{B1FE0C92-6B79-4F72-80FD-0E8159B24E10}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{B1FE0C92-6B79-4F72-80FD-0E8159B24E10}.Release|Any CPU.Build.0 = Release|Any CPU
+		{1F9B6DFB-D6AB-4801-A40D-B85DBF7C0416}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{1F9B6DFB-D6AB-4801-A40D-B85DBF7C0416}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{1F9B6DFB-D6AB-4801-A40D-B85DBF7C0416}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{1F9B6DFB-D6AB-4801-A40D-B85DBF7C0416}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+EndGlobal

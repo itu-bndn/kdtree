@@ -1,0 +1,36 @@
+{
+    "version": "0.0.0",
+    "description": "",
+    "authors": [
+    ],
+    "tags": [
+    ],
+    "projectUrl": "https://github.itu.dk/bndn/kdtree",
+    "licenseUrl": "https://github.itu.dk/bndn/kdtree/blob/master/LICENSE.md",
+
+    "dependencies": {
+        "FSharp.Dnx": {
+            "type": "build",
+            "version": "1.0.0-*"
+        }
+    },
+
+    "commands": {
+        "run": "run"
+    },
+
+    "frameworks": {
+        "dnx451": {}
+    },
+
+    "compiler": {
+        "name": "F#",
+        "compilerAssembly": "FSharp.Dnx",
+        "compilerType": "FSharp.Dnx.FSharpProjectCompiler"
+    },
+    "fsharp": {
+        "files": [
+            "Program.fs"
+        ]
+    }
+}
