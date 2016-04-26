@@ -1,22 +1,25 @@
 {
     "version": "0.0.0",
-    "description": "",
+    "description": "A generic k-dimensional tree implementation with improved split heuristics",
     "authors": [
+        "Kasper Kronborg Isager <kasi@itu.dk>"
     ],
     "tags": [
+        "generic",
+        "kd",
+        "tree"
     ],
     "projectUrl": "https://github.itu.dk/bndn/kdtree",
     "licenseUrl": "https://github.itu.dk/bndn/kdtree/blob/master/LICENSE.md",
 
     "dependencies": {
+        "Point": "",
+        "Vector": "",
+        "Ray": "",
         "FSharp.Dnx": {
             "type": "build",
             "version": "1.0.0-*"
         }
-    },
-
-    "commands": {
-        "run": "run"
     },
 
     "frameworks": {
@@ -30,7 +33,8 @@
     },
     "fsharp": {
         "files": [
-            "Program.fs"
+            "Kdtree.fsi",
+            "Kdtree.fs"
         ]
     }
 }

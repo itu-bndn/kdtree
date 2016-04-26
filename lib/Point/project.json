@@ -1,0 +1,9 @@
+{
+    "frameworks": {
+        "dnx451": {
+            "bin": {
+                "assembly": "Point.0.0.0.dll"
+            }
+        }
+    }
+}
