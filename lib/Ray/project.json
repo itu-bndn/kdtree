@@ -2,7 +2,7 @@
     "frameworks": {
         "dnx451": {
             "bin": {
-                "assembly": "Ray.0.0.0.dll"
+                "assembly": "Ray.0.1.0.dll"
             }
         }
     }
