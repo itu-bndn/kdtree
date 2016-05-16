@@ -1,19 +1,10 @@
 {
-    "version": "0.0.0",
-    "description": "",
-    "authors": [
-    ],
-    "tags": [
-    ],
-    "projectUrl": "https://github.itu.dk/bndn/kdtree",
-    "licenseUrl": "https://github.itu.dk/bndn/kdtree/blob/master/LICENSE.md",
-
     "dependencies": {
+        "Kdtree": "",
         "FSharp.Dnx": {
             "type": "build",
             "version": "1.0.0-*"
         },
-        "Kdtree": "1.0.0",
         "Xunit": "2.1.0-*",
         "Xunit.Runner.Dnx": "2.1.0-*",
         "FsUnit.xUnit": "1.4.1"
@@ -34,6 +25,7 @@
     },
     "fsharp": {
         "files": [
+            "KdtreeTest.fs"
         ]
     }
 }

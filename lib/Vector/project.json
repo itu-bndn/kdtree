@@ -1,0 +1,9 @@
+{
+    "frameworks": {
+        "dnx451": {
+            "bin": {
+                "assembly": "Vector.0.0.0.dll"
+            }
+        }
+    }
+}
