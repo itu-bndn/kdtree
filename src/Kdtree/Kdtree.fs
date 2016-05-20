@@ -1,264 +1,203 @@
 module Kdtree
 
-open Point
+/// <summary>
+/// Alias for the representation of an axis. Since it has three possible values
+/// then we can represent it in a single byte. The overhead for a discriminated
+/// union is 12 bytes per case, so a byte representation is much cheaper.
+/// </summary>
+type Axis = byte
 
-type Axis = X | Y | Z
+/// <summary>
+/// Alias for the representation of a split position.
+/// </summary>
+type Split = float
 
-[<NoComparison>]
-type Bounds = Bounds of Point * w:float * h:float * d:float
+/// <summary>
+/// Alias for the representation of bounding boxes; three coordinates and then
+/// a width, a height, and a depth.
+/// <summary>
+type Bounds = float * float * float * float * float * float
+
+/// <summary>
+/// Type for representing elements when constructing the tree; the value of the
+/// element, as specified by the caller, the bounds of the element, and two
+/// mutable variables used for optimizing classification and filtering.
+/// </summary>
+type 'e Element =
+    {
+        Value: 'e;
+        Bounds: Bounds;
+        mutable Left: bool;
+        mutable Right: bool;
+    }
 
 [<NoComparison>]
 type 'e Node =
-    | Node of Axis * s:float * l:'e Node * r:'e Node
-    | Leaf of 'e list
+    | Node of Axis * Split * l:'e Node * r:'e Node
+    | Leaf of 'e array
 
 [<NoComparison>]
 type 'e Tree = Tree of Bounds * 'e Node
 
+/// <summary>
+/// Alias for making nice-looking type definitions on the calling end.
+/// </summary>
 type 'e kdtree = 'e Tree
 
 [<Literal>]
-let MaximumCost = 1.75
+let X = 0uy
 
 [<Literal>]
-let MaximumOverlap = 0.6
+let Y = 1uy
+
+[<Literal>]
+let Z = 2uy
+
+[<Literal>]
+let S = 0uy
+
+[<Literal>]
+let E = 1uy
 
 /// <summary>
-/// Get the origin of a bounding box.
+/// The approximate cost of traversing one level down the tree. This is rather
+/// expensive as every traversal step requires O(n) construction time.
 /// </summary>
-/// <param name=b>The bounds whose origin to get.</param>
-/// <returns>The origin of the bounds.</returns>
-let getOrigin = function Bounds(p, _, _, _) -> p
+[<Literal>]
+let TraversalCost = 100.
 
 /// <summary>
-/// Get the width of a bounding box.
+/// The approximate cost a computing a single intersection. This is pretty
+/// cheap, but in some cases making the tree one level deeper might be cheaper.
 /// </summary>
-/// <param name=b>The bounds whose width to get.</param>
-/// <returns>The width of the bounds.</returns>
-let getWidth = function Bounds(_, w, _, _) -> w
+[<Literal>]
+let IntersectionCost = 2.
 
 /// <summary>
-/// Get the height of a bounding box.
+/// Compute the surface area of a bounding box.
 /// </summary>
-/// <param name=b>The bounds whose height to get.</param>
-/// <returns>The height of the bounds.</returns>
-let getHeight = function Bounds(_, _, h, _) -> h
+let inline area (_, _, _, w, h, d) = 2. * h * w + 2. * h * d + 2. * w * d
 
 /// <summary>
-/// Get the depth of a bounding box.
+/// Generate events for a list of elements.
 /// </summary>
-/// <param name=b>The bounds whose depth to get.</param>
-/// <returns>The depth of the bounds.</returns>
-let getDepth = function Bounds(_, _, _, d) -> d
+let inline events es =
+    // Generate the events for a single axis.
+    let e a = es |> Array.collect (fun e ->
+        let x, y, z, w, h, d = (!e).Bounds
 
-/// <summary>
-/// Get the dimensions of a bounding box.
-/// </summary>
-/// <param name=b>The bounds whose dimensions to get.</param>
-/// <returns>The dimensions of the bounds.</returns>
-let getDimensions = function Bounds(_, w, h, d) -> (w, h, d)
+        match a with
+        | X -> [|e, x, S; e, x + w, E|]
+        | Y -> [|e, y, S; e, y + h, E|]
+        | _ -> [|e, z, S; e, z + d, E|]
+    )
 
-/// <summary>
-/// Get the minimum and maximum values of a bounding box.
-/// </summary>
-/// <param name=b>The bounds.</param>
-/// <returns>The minimum and maximum values of the bounds.</returns>
-let minMax b =
-    let p = getOrigin b
-    let x = let x' = Point.getX p in (x', x' + getWidth b)
-    let y = let y' = Point.getY p in (y', y' + getHeight b)
-    let z = let z' = Point.getZ p in (z', z' + getDepth b)
-    (x, y, z)
-
-/// <summary>
-/// Get the minimum and maximum values of a bounding box at a given axis.
-/// </summary>
-/// <param name=a>The axis.</param>
-/// <param name=b>The bounds.</param>
-/// <returns>The minimum and maximum values of the bounds at the axis.</returns>
-let minMaxAt a b =
-    let (x, y, z) = minMax b
-    match a with
-    | X -> x
-    | Y -> y
-    | Z -> z
-
-/// <summary>
-/// Get the global minimum and maximum values of a list of bounding box.
-/// </summary>
-let globalMinMax bs =
-    let f (xv, xa, yv, ya, zv, za) b =
-        let ((xv', xa'), (yv', ya'), (zv', za')) = minMax b
-        (
-            min xv xv', max xa xa',
-            min yv yv', max ya ya',
-            min zv zv', max za za'
+    // Generate the sorted events for all axis.
+    [|X .. Z|] |> Array.map (fun a ->
+        // Sort the events by their split value and type.
+        e a |> Array.sortWith (fun (_, v, t) (_, u, s) ->
+            if v = u then compare t s else compare v u
         )
-
-    // Find the minimum and maximum values of each axis.
-    let i = infinity in List.fold f (i, -i, i, -i, i, -i) bs
-
-/// <summary>
-/// Get the global bounds of a list of bounding box.
-/// </summary>
-let globalBounds bs =
-    let (xv, xa, yv, ya, zv, za) = globalMinMax bs
-    Bounds(
-        Point.make xv yv zv,
-        xa - xv,
-        ya - yv,
-        za - zv
     )
 
 /// <summary>
-/// Given a list of bounds, compute the axis with the largest span.
+/// Compute the bounds of a list of elements.
 /// </summary>
-/// <param name=bs>The list of bounds.</param>
-/// <returns>The largest axis and its size.</returns>
-let largestAxis b =
-    let w = getWidth b
-    let h = getHeight b
-    let d = getDepth b
+let inline bounds es =
+    let f (xv, xa, yv, ya, zv, za) e =
+        let x, y, z, w, h, d = (!e).Bounds
 
-    match (max w (max h d)) with
-    | n when n = w -> (X, n)
-    | n when n = h -> (Y, n)
-    | n            -> (Z, n)
+        min xv x, max xa x + w,
+        min yv y, max ya y + h,
+        min zv z, max za z + d
+
+    let i = infinity
+
+    // Find the minimum and maximum values of each axis.
+    let xv, xa, yv, ya, zv, za = es |> Array.fold f (i, -i, i, -i, i, -i)
+
+    // Compute the final bounds based on the minimums and maximums.
+    xv, yv, zv, xa - xv, ya - yv, za - zv
 
 /// <summary>
-/// Given a list of bounding boxes, construct a list of candidate splits along an axis.
+/// Split a bounding box at a split position along an axis.
 /// </summary>
-/// <param name=a>The axis along which to find candidate splits.</param>
-/// <param name=bs>The bounds for which to construct candidate splits.</param>
-/// <returns>A sorted list of distinct candidate splits.</returns>
-let candidateSplits a b =
-    let (bv, ba) = minMaxAt a b
-
-    let f cs b =
-        // Let the minimum and maximum values be candidate splits...
-        let (vv, va) = minMaxAt a b
-
-        // ...provided that they're within the bounds we're splitting.
-        let cs = if vv > bv && vv < ba then vv :: cs else cs
-        let cs = if va > bv && va < ba then va :: cs else cs
-
-        cs
-
-    List.fold f [] >> List.distinct >> List.sort
+let inline split a s (x, y, z, w, h, d) =
+    match a with
+    | X -> (x, y, z, s - x, h, d), (s, y, z, w - (s - x), h, d)
+    | Y -> (x, y, z, w, s - y, d), (x, s, z, w, h - (s - y), d)
+    | _ -> (x, y, z, w, h, s - z), (x, y, s, w, h, d - (s - z))
 
 /// <summary>
-/// Compute the approximate cost of making a split along an axis.
+/// Find the best plane along an axis at which to make a split.
 /// </summary>
-/// <remarks>
-/// The cost approximation takes the following factors into account:
-/// - The surface areas on both sides of the split.
-/// - The number of elements on either side of the split.
-/// - The number of overlaps caused by the split.
-/// The higher any of these factors are, the costlier the split.
-/// </remarks>
-/// <param name=a>The axis to split along.</param>
-/// <param name=sl>The surface area to the left of the split.</param>
-/// <param name=sr>The surface area to the right of the split.
-/// <param name=s>The split.</param>
-/// <param name=bs>The bounds to compute the cost of splitting.</param>
-/// <returns>The approximate cost of making the split.</returns>
-let approximateCost a sl sr s bs =
-    let f (nl, nr, nt, no) b =
-        let (vv, va) = minMaxAt a b
+let inline plane a b ev =
+    let sp = area b
 
-        // Check if the bounds lie on the left and/or right side of the split.
-        let nl = if vv < s then nl + 1 else nl
-        let nr = if va > s then nr + 1 else nr
+    let bc = Array.fold (fun (i, i', c', s', nl, nr) (_, s, t) ->
+        // Check if the element will lie on the right side of the split.
+        let nr = if t = E then nr - 1 else nr
 
-        // Check if the bounds overlap the split point.
-        let no = if vv < s && va > s then no + 1 else no
+        // Split the parent bounds at the split position of the current event.
+        let bl, br = split a s b
 
-        (nl, nr, nt + 1, no)
-
-    let (nl, nr, nt, no) = List.fold f (0, 0, 0, 0) bs
-
-    // Stop when too many bounds are on both sides of the split.
-    if float no / float nt >= MaximumOverlap then infinity else
-
-    (float nl / float nt) * sl + (float nr / float nt) * sr
-
-/// <summary>
-/// Compute the optimal split to make for a list of bounding boxes.
-/// </summary>
-/// <param name=b>The global bounds of the bounds to split.</param>
-/// <param name=bs>The bounds to split.</param>
-/// <returns>The value of where to make an optimal split and the axis to split along.</param>
-let optimalSplit b bs =
-    let (a, w) = largestAxis b
-    let (l, _) = minMaxAt a b
-
-    if w = 0.0 then None else
-
-    let cs = candidateSplits a b bs
-
-    let f (c, s) s' =
-        // Compute the relative axis areas that the split will cause.
-        let sl = (s' - l) / w
-        let sr = 1. - sl
+        // Compute the relative surface areas of the left and rights bounds
+        // after the split has been made.
+        let sl = area bl / sp
+        let sr = area br / sp
 
         // Compute the cost of making this split.
-        let c' = approximateCost a sl sr s' bs
+        let c = TraversalCost + IntersectionCost * (float nl * sl + float nr * sr)
 
-        // Check if we've found a better place to make the split.
-        if c' < c then (c', s') else (c, s)
+        // Check if the element will lie on the left side of the split.
+        let nl = if t = S then nl + 1 else nl
 
-    match List.fold f (infinity, 0.) cs with
-    | (c, s) when c < MaximumCost -> Some (a, s)
-    | _ -> None
+        // Otherwise, check if we've encountered a better split position.
+        if c < c'
+        then i + 1, i,  c,  s,  nl, nr
+        else i + 1, i', c', s', nl, nr
+    )
 
-/// <summary>
-/// Split a bounding box at a point along an axis.
-/// </summary>
-let splitBounds (a, s) b =
-    let p = getOrigin b
-    let x = Point.getX p
-    let y = Point.getY p
-    let z = Point.getZ p
+    // Feed the initial values to the cost estimation.
+    let bc = bc <| (0, 0, infinity, 0., 0, Array.length ev / 2)
 
-    let (w, h, d) = getDimensions b
-
-    match a with
-    | X ->
-        let v = s - x
-        let v' = w - v
-        (
-            Bounds(Point.make x y z, v, h, d),
-            Bounds(Point.make (x + v) y z, v', h, d)
-        )
-    | Y ->
-        let v = s - y
-        let v' = h - v
-        (
-            Bounds(Point.make x y z, w, v, d),
-            Bounds(Point.make x (y + v) z, w, v', d)
-        )
-    | Z ->
-        let v = s - z
-        let v' = d - v
-        (
-            Bounds(Point.make x y z, w, h, v),
-            Bounds(Point.make x y (z + v), w, h, v')
-        )
+    let _, i, c, s, _, _  = bc ev in i, c, s
 
 /// <summary>
-/// Split a list of elements at a point along an axis.
+/// Classify events to determine whether they're left and/or right of a split.
+/// <summary>
+let inline classify i ev =
+    let n = Array.length ev
+
+    for i = 0 to i do
+        let (e, _, t) = Array.get ev i in if t = S then (!e).Left <- true
+
+    for i = i to n - 1 do
+        let (e, _, t) = Array.get ev i in if t = E then (!e).Right <- true
+
+/// <summary>
+/// Filter events according to a classification.
 /// </summary>
-let splitElements (a, s) es =
-    let f (el, er) (e, b) =
-        let (vv, va) = minMaxAt a b
+let inline filter es evs =
+    // Split the elements into left and right parts.
+    let el = es |> Array.filter (fun e -> (!e).Left)
+    let er = es |> Array.filter (fun e -> (!e).Right)
 
-        // Check if the bounds lie on the left and/or right side of the split.
-        let el = if vv <= s then (e, b) :: el else el
-        let er = if va >  s then (e, b) :: er else er
+    // Split the events into left and right parts.
+    let evl = evs |> Array.map (fun ev ->
+        ev |> Array.filter (fun (e, _, _) -> (!e).Left)
+    )
+    let evr = evs |> Array.map (fun ev ->
+        ev |> Array.filter (fun (e, _, _) -> (!e).Right)
+    )
 
-        (el, er)
+    // Clear the classifications now that the elements have been filtered.
+    do es |> Array.iter (fun e ->
+        do (!e).Left  <- false
+        do (!e).Right <- false
+    )
 
-    List.fold f ([], []) es
+    el, evl, er, evr
 
 /// <summary>
 /// Recursively construct a tree given a bounding box and a list of elements and their bounds.
@@ -266,25 +205,44 @@ let splitElements (a, s) es =
 /// <remarks>
 /// This function uses continuations in order to avoid unbounded stack growth.
 /// </remarks>
-/// <param name=b>The global bounding box for the elements.</param>
-/// <param name=es>The element list to construct a tree for.</param>
-/// <param name=f>The continuation function.</param>
-/// <returns>The constructed tree.</returns>
-let rec construct b es f =
-    let bs = List.fold (fun bs (_, b) -> b :: bs) [] es
+let rec construct b es evs cont =
+    // Start off by finding the best place to split the current bounds.
+    let a, (i, c, s) =
+        // Compute the best splitting plane for each axis across the events.
+        evs |> Array.mapi  (fun i ev -> let a = byte i in a, plane a b ev)
+            // Find the splitting plane with the lowest cost across the axis.
+            |> Array.minBy (fun (_, (_, c, _)) -> c)
 
-    match optimalSplit b bs with
-    | Some (a, s) ->
-        let (bl, br) = splitBounds (a, s) b
-        let (el, er) = splitElements (a, s) es
+    // Get the events for the axis that has been chosen for the split plane.
+    let ev = Array.get evs <| int a
 
-        construct bl el (fun l ->
-            construct br er (fun r ->
-                f (Node(a, s, l, r))
+    // If it's no longer beneficial to split the elements, i.e. the cost of
+    // making the split exceeds that of intersecting all elements, then stop
+    // splitting and construct a leaf.
+    if c > IntersectionCost * float (Array.length ev)
+    then
+        Leaf(Array.map (fun e -> (!e).Value) es) |> cont
+    else
+        // 1st step of the split: Classify all events in order to determine on
+        // which side of the split an event, and its associated element, will
+        // fall. This is done by mutating the internal element representations.
+        do classify i ev
+
+        // 2nd step of the split: Filter all elements and their events in order
+        // to obtain four lists; one with elements on the left, one with events
+        // on the left, one with elements on the right, and finally one with
+        // events on the right.
+        let el, evl, er, evr = filter es evs
+
+        // 3rd step of the split: Divide the parent bounds into two, which will
+        // potentially be further subdivided.
+        let bl, br = split a s b
+
+        construct bl el evl (fun l ->
+            construct br er evr (fun r ->
+                Node(a, s, l, r) |> cont
             )
         )
-
-    | None -> f (Leaf(List.fold (fun es (e, _) -> e :: es) [] es))
 
 /// <summary>
 /// Construct a tree from a list of elements and their bounds.
@@ -292,44 +250,61 @@ let rec construct b es f =
 /// <param name=es>The list of elements and their bounds.</param>
 /// <returns>The constructed tree.</returns>
 let make es =
-    let f (es, bs) (e, b) =
-        let b = Bounds b
-        ((e, b) :: es, b :: bs)
+    // Convert the element list to an array. This gives us the benefit of much
+    // faster iteration as items are then stored in contigous memory blocks
+    // rather than scattered all over the place.
+    // This also converts the elements to an internal, referenceable format in
+    // order to allow for performant tree construction.
+    let es = es |> List.toArray |> Array.map (fun (e, (p, w, h, d)) ->
+        let x, y, z = Point.getCoord p in ref {
+            Value = e;
+            Bounds = x, y, z, w, h, d;
+            Left = false;
+            Right = false;
+        }
+    )
 
-    let (es, bs) = List.fold f ([], []) es
-
-    let gb = globalBounds bs in Tree(gb, construct gb es id)
+    // Then, compute the global bounds of the elements. These are the bounds
+    // that we wish to split into several partitions. These are also stored in
+    // the root of the tree and used for bootstrapping the construction of the
+    // tree nodes.
+    // The construction then proceeds, initially supplied a pre-processed list
+    // of events to be split.
+    let b = bounds es in Tree(b, construct b es (events es) id)
 
 /// <summary>
 /// Get the direction of a ray at a given axis.
 /// </summary>
-let direction a r =
+let inline direction a r =
     match a with
     | X -> Vector.getX (Ray.getVector r)
     | Y -> Vector.getY (Ray.getVector r)
-    | Z -> Vector.getZ (Ray.getVector r)
+    | _ -> Vector.getZ (Ray.getVector r)
 
 /// <summary>
 /// Get the origin of a ray at a given axis.
 /// </summary>
-let origin a r =
+let inline origin a r =
     match a with
     | X -> Point.getX (Ray.getOrigin r)
     | Y -> Point.getY (Ray.getOrigin r)
-    | Z -> Point.getZ (Ray.getOrigin r)
+    | _ -> Point.getZ (Ray.getOrigin r)
 
 /// <summary>
 /// Get the distance of a ray to a bounding box at a given axis.
 /// </summary>
-let distance a r b =
-    let d = direction a r
-    let o = origin a r
+let inline distance a r (x, y, z, w, h, d) =
+    let di = direction a r
+    let oi = origin a r
 
-    let (l, h) = minMaxAt a b
+    let l, h = match a with
+               | X -> x, x + w
+               | Y -> y, y + h
+               | _ -> z, z + d
 
-    if d >= 0.
-    then ((l - o) / d, (h - o) / d)
-    else ((h - o) / d, (l - o) / d)
+    if di >= 0.
+    then ((l - oi) / di, (h - oi) / di)
+    else ((h - oi) / di, (l - oi) / di)
 
 /// <summary>
 /// Traverse the elements of a tree based on intersection with a ray.
@@ -339,38 +314,43 @@ let distance a r b =
 /// <param name=t>The tree to traverse.</param>
 /// <returns>The element if found during traversal.</returns>
 let traverse f r (Tree(b, n)) =
-    let rec t n r tmin tmax c =
+    let rec t n r tmin tmax cont =
         match n with
-        | Leaf [] -> c (None)
-        | Leaf es -> c (f tmax es)
-
+        // If we've found an empty leaf, then there's nothing to traverse.
+        | Leaf [||] -> cont (None)
+        // Otherwise, if a non-empty leaf is found, then pass on the items to
+        // the caller and let them determine if they've found what they're
+        // looking for.
+        // While the items are stored internally as arrays, we return them as
+        // a list to prevent modification by the caller.
+        | Leaf es -> cont (f tmax (Array.toList es))
+        // Finally, if we've found a non-leaf then figure out where to go from
+        // here; should we look in the left, right, or both children?
         | Node(a, s, ln, rn) ->
             let d = direction a r
             let o = origin a r
 
             // Figure out which is the near and far child.
-            let (near, far) = if o < s then (ln, rn) else (rn, ln)
+            let near, far = if o < s then ln, rn else rn, ln
 
             match (s - o) / d with
             // If we can establish which child the ray will traverse through,
             // then we only need to traverse one of the two children.
-            | thit when thit >= tmax || thit < 0. -> t near r tmin tmax c
-            | thit when thit <= tmin              -> t far  r tmin tmax c
+            | thit when thit >= tmax || thit < 0. -> t near r tmin tmax cont
+            | thit when thit <= tmin              -> t far  r tmin tmax cont
             // Otherwise, check for a hit in both children.
             | thit ->
                 t near r tmin thit (fun e ->
                     match e with
-                    | Some _ -> e
-                    | None   -> t far r thit tmax c
+                    | Some _ -> e |> cont
+                    | None   -> t far r thit tmax cont
                 )
 
-    let (txmin, txmax) = distance X r b
-    let (tymin, tymax) = distance Y r b
-    let (tzmin, tzmax) = distance Z r b
+    let txmin, txmax = distance X r b
+    let tymin, tymax = distance Y r b
+    let tzmin, tzmax = distance Z r b
 
     let tmin = max txmin (max tymin tzmin)
     let tmax = min txmax (min tymax tzmax)
 
-    if tmin < tmax && tmax > 0.
-    then t n r tmin tmax id
-    else None
+    if tmin < tmax && tmax > 0. then t n r tmin tmax id else None
