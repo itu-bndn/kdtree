@@ -6,6 +6,9 @@ open Ray
 [<NoComparison>]
 type 'e Tree
 
+/// <summary>
+/// Alias for making nice-looking type definitions on the calling end.
+/// </summary>
 type 'e kdtree = 'e Tree
 
 /// <summary>
