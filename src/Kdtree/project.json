@@ -1,6 +1,6 @@
 {
     "version": "0.0.0",
-    "description": "A generic k-dimensional tree implementation with improved split heuristics",
+    "description": "A generic k-dimensional tree implementation with surface area split heuristics",
     "authors": [
         "Kasper Kronborg Isager <kasi@itu.dk>"
     ],
