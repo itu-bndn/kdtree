@@ -13,6 +13,11 @@ type Axis = byte
 type Split = float
 
 /// <summary>
+/// Alias for the representation of an event type.
+/// </summary>
+type Type = byte
+
+/// <summary>
 /// Alias for the representation of bounding boxes; three coordinates and then
 /// a width, a height, and a depth.
 /// <summary>
@@ -29,6 +34,17 @@ type 'e Element =
         Bounds: Bounds;
         mutable Left: bool;
         mutable Right: bool;
+    }
+
+/// <summary>
+/// Type for representing events when constructing the tree; the element
+/// associated with the event, the split position, and the type of the event.
+/// <summary>
+type 'e Event =
+    {
+        Element: 'e Element ref;
+        Split: Split;
+        Type: Type;
     }
 
 [<NoComparison>]
@@ -64,7 +80,7 @@ let E = 1uy
 /// expensive as every traversal step requires O(n) construction time.
 /// </summary>
 [<Literal>]
-let TraversalCost = 100.
+let TraversalCost = 75.
 
 /// <summary>
 /// The approximate cost a computing a single intersection. This is pretty
@@ -86,17 +102,24 @@ let inline events es =
     let e a = es |> Array.collect (fun e ->
         let x, y, z, w, h, d = (!e).Bounds
 
-        match a with
-        | X -> [|e, x, S; e, x + w, E|]
-        | Y -> [|e, y, S; e, y + h, E|]
-        | _ -> [|e, z, S; e, z + d, E|]
+        let u, v = match a with
+                   | X -> x, x + w
+                   | Y -> y, y + h
+                   | _ -> z, z + d
+
+        [|
+            {Element = e; Split = u; Type = S};
+            {Element = e; Split = v; Type = E}
+        |]
     )
 
     // Generate the sorted events for all axis.
     [|X .. Z|] |> Array.map (fun a ->
         // Sort the events by their split value and type.
-        e a |> Array.sortWith (fun (_, v, t) (_, u, s) ->
-            if v = u then compare t s else compare v u
+        e a |> Array.sortWith (fun a b ->
+            if a.Split = b.Split
+            then compare a.Type b.Type
+            else compare a.Split b.Split
         )
     )
 
@@ -134,7 +157,9 @@ let inline split a s (x, y, z, w, h, d) =
 let inline plane a b ev =
     let sp = area b
 
-    let bc = Array.fold (fun (i, i', c', s', nl, nr) (_, s, t) ->
+    let bc = Array.fold (fun (i, i', c', s', nl, nr) e ->
+        let {Split = s; Type = t} = e
+
         // Check if the element will lie on the right side of the split.
         let nr = if t = E then nr - 1 else nr
 
@@ -170,10 +195,10 @@ let inline classify i ev =
     let n = Array.length ev
 
     for i = 0 to i do
-        let (e, _, t) = Array.get ev i in if t = S then (!e).Left <- true
+        let e = Array.get ev i in if e.Type = S then (!e.Element).Left <- true
 
     for i = i to n - 1 do
-        let (e, _, t) = Array.get ev i in if t = E then (!e).Right <- true
+        let e = Array.get ev i in if e.Type = E then (!e.Element).Right <- true
 
 /// <summary>
 /// Filter events according to a classification.
@@ -185,10 +210,10 @@ let inline filter es evs =
 
     // Split the events into left and right parts.
     let evl = evs |> Array.map (fun ev ->
-        ev |> Array.filter (fun (e, _, _) -> (!e).Left)
+        ev |> Array.filter (fun e -> (!e.Element).Left)
     )
     let evr = evs |> Array.map (fun ev ->
-        ev |> Array.filter (fun (e, _, _) -> (!e).Right)
+        ev |> Array.filter (fun e -> (!e.Element).Right)
     )
 
     // Clear the classifications now that the elements have been filtered.
@@ -203,15 +228,19 @@ let inline filter es evs =
 /// Recursively construct a tree given a bounding box and a list of elements and their bounds.
 /// </summary>
 /// <remarks>
-/// This function uses continuations in order to avoid unbounded stack growth.
+/// we can get away with
 /// </remarks>
-let rec construct b es evs cont =
+let rec construct b es evs =
+    let bp = Array.fold (fun (a', i', c', s') a ->
+        // Compute the best split to make for the current axis.
+        let i, c, s = plane a b <| (Array.get evs <| int a)
+
+        // Check if we've found a better place to make the split.
+        if c < c' then a, i, c, s else a', i', c', s'
+    )
+
     // Start off by finding the best place to split the current bounds.
-    let a, (i, c, s) =
-        // Compute the best splitting plane for each axis across the events.
-        evs |> Array.mapi  (fun i ev -> let a = byte i in a, plane a b ev)
-            // Find the splitting plane with the lowest cost across the axis.
-            |> Array.minBy (fun (_, (_, c, _)) -> c)
+    let a, i, c, s = [|X .. Z|] |> ((0uy, 0, infinity, 0.) |> bp)
 
     // Get the events for the axis that has been chosen for the split plane.
     let ev = Array.get evs <| int a
@@ -221,7 +250,7 @@ let rec construct b es evs cont =
     // splitting and construct a leaf.
     if c > IntersectionCost * float (Array.length ev)
     then
-        Leaf(Array.map (fun e -> (!e).Value) es) |> cont
+        Leaf(Array.map (fun e -> (!e).Value) es)
     else
         // 1st step of the split: Classify all events in order to determine on
         // which side of the split an event, and its associated element, will
@@ -238,11 +267,10 @@ let rec construct b es evs cont =
         // potentially be further subdivided.
         let bl, br = split a s b
 
-        construct bl el evl (fun l ->
-            construct br er evr (fun r ->
-                Node(a, s, l, r) |> cont
-            )
-        )
+        // Non-tail-recursively construct the left and right child of the tree.
+        // Using continuations becomes way too expensive, but the tree depth is
+        // for responsible inputs never greater than the maximum stack size.
+        Node(a, s, construct bl el evl, construct br er evr)
 
 /// <summary>
 /// Construct a tree from a list of elements and their bounds.
@@ -270,7 +298,7 @@ let make es =
     // tree nodes.
     // The construction then proceeds, initially supplied a pre-processed list
     // of events to be split.
-    let b = bounds es in Tree(b, construct b es (events es) id)
+    let b = bounds es in Tree(b, construct b es (events es))
 
 /// <summary>
 /// Get the direction of a ray at a given axis.
@@ -314,18 +342,10 @@ let inline distance a r (x, y, z, w, h, d) =
 /// <param name=t>The tree to traverse.</param>
 /// <returns>The element if found during traversal.</returns>
 let traverse f r (Tree(b, n)) =
-    let rec t n r tmin tmax cont =
+    let rec t n r tmin tmax =
         match n with
-        // If we've found an empty leaf, then there's nothing to traverse.
-        | Leaf [||] -> cont (None)
-        // Otherwise, if a non-empty leaf is found, then pass on the items to
-        // the caller and let them determine if they've found what they're
-        // looking for.
-        // While the items are stored internally as arrays, we return them as
-        // a list to prevent modification by the caller.
-        | Leaf es -> cont (f tmax (Array.toList es))
-        // Finally, if we've found a non-leaf then figure out where to go from
-        // here; should we look in the left, right, or both children?
+        // If we've found a non-leaf then figure out where to go from here;
+        // should we look in the left, right, or both children?
         | Node(a, s, ln, rn) ->
             let d = direction a r
             let o = origin a r
@@ -336,15 +356,17 @@ let traverse f r (Tree(b, n)) =
             match (s - o) / d with
             // If we can establish which child the ray will traverse through,
             // then we only need to traverse one of the two children.
-            | thit when thit >= tmax || thit < 0. -> t near r tmin tmax cont
-            | thit when thit <= tmin              -> t far  r tmin tmax cont
+            | thit when thit >= tmax || thit < 0. -> t near r tmin tmax
+            | thit when thit <= tmin              -> t far  r tmin tmax
             // Otherwise, check for a hit in both children.
             | thit ->
-                t near r tmin thit (fun e ->
-                    match e with
-                    | Some _ -> e |> cont
-                    | None   -> t far r thit tmax cont
-                )
+                match t near r tmin thit with
+                | Some e -> Some e
+                | None   -> t far r thit tmax
+
+        // If a leaf is found, then pass on the items to the caller and let
+        // them determine if they've found what they're looking for.
+        | Leaf es -> f es
 
     let txmin, txmax = distance X r b
     let tymin, tymax = distance Y r b
@@ -353,4 +375,4 @@ let traverse f r (Tree(b, n)) =
     let tmin = max txmin (max tymin tzmin)
     let tmax = min txmax (min tymax tzmax)
 
-    if tmin < tmax && tmax > 0. then t n r tmin tmax id else None
+    if tmin < tmax && tmax > 0. then t n r tmin tmax else None
