@@ -25,4 +25,4 @@ val make : es:('e * (Point * float * float * float)) list -> 'e Tree
 /// <param name=r>The ray to use for traversing the tree.</param>
 /// <param name=t>The tree to traverse.</param>
 /// <returns>The element if found during traversal.</returns>
-val traverse : f:(float -> 'e list -> 'a option) -> r:Ray -> t:'e Tree -> 'a option
+val traverse : f:('e array -> 'a option) -> r:Ray -> t:'e Tree -> 'a option
