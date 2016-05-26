@@ -105,7 +105,7 @@ let inline area (_, _, _, w, h, d) = 2. * h * w + 2. * h * d + 2. * w * d
 /// </summary>
 let inline events es =
     // Generate the events for a single axis.
-    let e a = es |> Array.collect (fun e ->
+    let e a = es |> Array.Parallel.collect (fun e ->
         let x, y, z, w, h, d = (!e).Bounds
 
         let u, v = match a with
@@ -200,13 +200,15 @@ let inline plane a b ev =
 let inline classify i ev =
     let n = Array.length ev
 
-    for i = 0 to i do
+    [|0 .. i|] |> Array.Parallel.iter (fun i ->
         let e = Array.get ev i
         if e.Type = S then (!e.Element).Left <- true
+    )
 
-    for i = i to n - 1 do
+    [|i .. n - 1|] |> Array.Parallel.iter (fun i ->
         let e = Array.get ev i
         if e.Type = E then (!e.Element).Right <- true
+    )
 
 /// <summary>
 /// Filter events according to a classification.
@@ -225,7 +227,7 @@ let inline filter es evs =
     )
 
     // Clear the classifications now that the elements have been filtered.
-    do es |> Array.iter (fun e ->
+    do es |> Array.Parallel.iter (fun e ->
         do (!e).Left  <- false
         do (!e).Right <- false
     )
@@ -258,7 +260,7 @@ let rec construct b es evs d =
     // splitting and construct a leaf.
     if d > MaximumDepth || c > IntersectionCost * float (Array.length ev)
     then
-        Leaf(Array.map (fun e -> (!e).Value, (!e).Bounds) es)
+        Leaf(Array.Parallel.map (fun e -> (!e).Value, (!e).Bounds) es)
     else
         // 1st step of the split: Classify all events in order to determine on
         // which side of the split an event, and its associated element, will
@@ -291,7 +293,7 @@ let make es =
     // rather than scattered all over the place.
     // This also converts the elements to an internal, referenceable format in
     // order to allow for performant tree construction.
-    let es = es |> List.toArray |> Array.map (fun (e, (p, w, h, d)) ->
+    let es = es |> List.toArray |> Array.Parallel.map (fun (e, (p, w, h, d)) ->
         let x, y, z = Point.getCoord p in ref {
             Value = e;
             Bounds = x, y, z, w, h, d;
