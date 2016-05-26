@@ -80,7 +80,7 @@ let E = 1uy
 /// expensive as every traversal step requires O(n) construction time.
 /// </summary>
 [<Literal>]
-let TraversalCost = 75.
+let TraversalCost = 100.
 
 /// <summary>
 /// The approximate cost a computing a single intersection. This is pretty
