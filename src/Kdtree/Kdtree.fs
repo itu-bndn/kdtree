@@ -50,7 +50,7 @@ type 'e Event =
 [<NoComparison>]
 type 'e Node =
     | Node of Axis * Split * l:'e Node * r:'e Node
-    | Leaf of 'e array
+    | Leaf of ('e * Bounds) array
 
 [<NoComparison>]
 type 'e Tree = Tree of Bounds * 'e Node
@@ -80,14 +80,20 @@ let E = 1uy
 /// expensive as every traversal step requires O(n) construction time.
 /// </summary>
 [<Literal>]
-let TraversalCost = 100.
+let TraversalCost = 25.
 
 /// <summary>
 /// The approximate cost a computing a single intersection. This is pretty
 /// cheap, but in some cases making the tree one level deeper might be cheaper.
 /// </summary>
 [<Literal>]
-let IntersectionCost = 2.
+let IntersectionCost = 1.
+
+/// <summary>
+/// The maximum depth allowed during tree construction.
+/// </summary>
+[<Literal>]
+let MaximumDepth = 50
 
 /// <summary>
 /// Compute the surface area of a bounding box.
@@ -195,10 +201,12 @@ let inline classify i ev =
     let n = Array.length ev
 
     for i = 0 to i do
-        let e = Array.get ev i in if e.Type = S then (!e.Element).Left <- true
+        let e = Array.get ev i
+        if e.Type = S then (!e.Element).Left <- true
 
     for i = i to n - 1 do
-        let e = Array.get ev i in if e.Type = E then (!e.Element).Right <- true
+        let e = Array.get ev i
+        if e.Type = E then (!e.Element).Right <- true
 
 /// <summary>
 /// Filter events according to a classification.
@@ -230,7 +238,7 @@ let inline filter es evs =
 /// <remarks>
 /// we can get away with
 /// </remarks>
-let rec construct b es evs =
+let rec construct b es evs d =
     let bp = Array.fold (fun (a', i', c', s') a ->
         // Compute the best split to make for the current axis.
         let i, c, s = plane a b <| (Array.get evs <| int a)
@@ -248,9 +256,9 @@ let rec construct b es evs =
     // If it's no longer beneficial to split the elements, i.e. the cost of
     // making the split exceeds that of intersecting all elements, then stop
     // splitting and construct a leaf.
-    if c > IntersectionCost * float (Array.length ev)
+    if d > MaximumDepth || c > IntersectionCost * float (Array.length ev)
     then
-        Leaf(Array.map (fun e -> (!e).Value) es)
+        Leaf(Array.map (fun e -> (!e).Value, (!e).Bounds) es)
     else
         // 1st step of the split: Classify all events in order to determine on
         // which side of the split an event, and its associated element, will
@@ -270,7 +278,7 @@ let rec construct b es evs =
         // Non-tail-recursively construct the left and right child of the tree.
         // Using continuations becomes way too expensive, but the tree depth is
         // for responsible inputs never greater than the maximum stack size.
-        Node(a, s, construct bl el evl, construct br er evr)
+        Node(a, s, construct bl el evl (d + 1), construct br er evr (d + 1))
 
 /// <summary>
 /// Construct a tree from a list of elements and their bounds.
@@ -298,7 +306,7 @@ let make es =
     // tree nodes.
     // The construction then proceeds, initially supplied a pre-processed list
     // of events to be split.
-    let b = bounds es in Tree(b, construct b es (events es))
+    let b = bounds es in Tree(b, construct b es (events es) 0)
 
 /// <summary>
 /// Get the direction of a ray at a given axis.
@@ -334,6 +342,18 @@ let inline distance a r (x, y, z, w, h, d) =
     then ((l - oi) / di, (h - oi) / di)
     else ((h - oi) / di, (l - oi) / di)
 
+let inline intersect r b =
+    let txmin, txmax = distance X r b
+    let tymin, tymax = distance Y r b
+    let tzmin, tzmax = distance Z r b
+
+    let tmin = max txmin (max tymin tzmin)
+    let tmax = min txmax (min tymax tzmax)
+
+    if tmin < tmax && tmax > 0.
+    then Some(tmin, tmax)
+    else None
+
 /// <summary>
 /// Traverse the elements of a tree based on intersection with a ray.
 /// </summary>
@@ -366,13 +386,12 @@ let traverse f r (Tree(b, n)) =
 
         // If a leaf is found, then pass on the items to the caller and let
         // them determine if they've found what they're looking for.
-        | Leaf es -> f es
+        | Leaf es -> f <| (es |> Array.choose (fun (e, b) ->
+            match intersect r b with
+            | Some _ -> Some e
+            | None   -> None
+        ))
 
-    let txmin, txmax = distance X r b
-    let tymin, tymax = distance Y r b
-    let tzmin, tzmax = distance Z r b
-
-    let tmin = max txmin (max tymin tzmin)
-    let tmax = min txmax (min tymax tzmax)
-
-    if tmin < tmax && tmax > 0. then t n r tmin tmax else None
+    match intersect r b with
+    | Some(tmin, tmax) -> t n r tmin tmax
+    | None -> None
